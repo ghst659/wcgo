@@ -4,29 +4,51 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"sync"
 )
+
+func fileReadAll(path string, channel chan<- byte) {
+	defer close(channel)
+	if data, err := ioutil.ReadFile(path); err == nil {
+		for _, datum := range data {
+			channel <- datum
+		}
+	} else {
+		panic(err)
+	}
+}
+
+func fileReadBuf(path string, channel chan<- byte) {
+	defer close(channel)
+	if f, err := os.Open(path); err == nil {
+		defer f.Close()
+		const BUFSIZ = 16
+		buf := make([]byte, BUFSIZ)
+		readCount := 0
+		for n, err := f.Read(buf); err == nil; n, err = f.Read(buf) {
+			readCount++
+			for i := 0; i < n; i++ {
+				channel <- buf[i]
+			}
+		}
+		fmt.Fprintf(os.Stderr, "%s: read count: %d\n", path, readCount)
+	} else {
+		panic(err)
+	}
+}
+
+func fileBytes(path string) chan byte {
+	channel := make(chan byte)
+	go fileReadBuf(path, channel)
+	return channel
+}
 
 type count struct {
 	Path  string
 	Chars int
 	Words int
 	Lines int
-}
-
-func fileBytes(path string) chan byte {
-	channel := make(chan byte)
-	go func() {
-		defer close(channel)
-		if data, err := ioutil.ReadFile(path); err == nil {
-			for _, datum := range data {
-				channel <- datum
-			}
-		} else {
-			panic(err)
-		}
-	}()
-	return channel
 }
 
 func scoreFile(path string, wg *sync.WaitGroup, result chan<- count) {
