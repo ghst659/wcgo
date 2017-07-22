@@ -15,21 +15,21 @@ type count struct {
 }
 
 func fileBytes(path string) chan byte {
-	c := make(chan byte)
+	channel := make(chan byte)
 	go func() {
-		dat, err := ioutil.ReadFile(path)
-		if err != nil {
+		defer close(channel)
+		if data, err := ioutil.ReadFile(path); err == nil {
+			for _, datum := range data {
+				channel <- datum
+			}
+		} else {
 			panic(err)
 		}
-		for _, b := range dat {
-			c <- b
-		}
-		close(c)
 	}()
-	return c
+	return channel
 }
 
-func countFile(path string, wg *sync.WaitGroup, result chan<- count) {
+func scoreFile(path string, wg *sync.WaitGroup, result chan<- count) {
 	defer wg.Done()
 	score := count{
 		Path:  path,
@@ -38,9 +38,9 @@ func countFile(path string, wg *sync.WaitGroup, result chan<- count) {
 		Lines: 0,
 	}
 	inWord := false
-	for b := range fileBytes(path) {
+	for datum := range fileBytes(path) {
 		score.Chars++
-		switch b {
+		switch datum {
 		case ' ', '\t':
 			if inWord {
 				score.Words++
@@ -72,7 +72,7 @@ func main() {
 		if *fVerbose {
 			fmt.Printf("%d:\t%s\n", i, arg)
 		}
-		go countFile(arg, wg, results)
+		go scoreFile(arg, wg, results)
 	}
 	go func() {
 		wg.Wait()
