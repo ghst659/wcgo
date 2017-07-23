@@ -1,10 +1,12 @@
 package main
 
 import (
+	"path/filepath"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"sort"
 	"sync"
 )
 
@@ -23,7 +25,7 @@ func fileReadBuf(path string, channel chan<- byte) {
 	defer close(channel)
 	if f, err := os.Open(path); err == nil {
 		defer f.Close()
-		const BUFSIZ = 16
+		const BUFSIZ = 1024
 		buf := make([]byte, BUFSIZ)
 		readCount := 0
 		for n, err := f.Read(buf); err == nil; n, err = f.Read(buf) {
@@ -81,6 +83,32 @@ func scoreFile(path string, wg *sync.WaitGroup, result chan<- count) {
 	result <- score
 }
 
+func makeVisitor(wg *sync.WaitGroup, results chan<- count) filepath.WalkFunc {
+	v := func(path string, info os.FileInfo, err error) error {
+		if err == nil {
+			switch mode := info.Mode(); {
+			case mode.IsRegular():
+				wg.Add(1)
+				go scoreFile(path, wg, results)
+			default:
+				// do nothing
+			}
+			return nil
+		} else {
+			return err
+		}
+	}
+	return v
+}
+
+func sortedKeys(m map[string]count) (keys []string) {
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func main() {
 	fChars := flag.Bool("c", false, "Count chars.")
 	fWords := flag.Bool("w", false, "Count words.")
@@ -89,12 +117,11 @@ func main() {
 	flag.Parse()
 	results := make(chan count)
 	wg := &sync.WaitGroup{}
-	wg.Add(flag.NArg())
 	for i, arg := range flag.Args() {
 		if *fVerbose {
 			fmt.Printf("%d:\t%s\n", i, arg)
 		}
-		go scoreFile(arg, wg, results)
+		filepath.Walk(arg, makeVisitor(wg, results))
 	}
 	go func() {
 		wg.Wait()
@@ -104,16 +131,16 @@ func main() {
 	for result := range results {
 		tally[result.Path] = result
 	}
-	for _, arg := range flag.Args() {
+	for _, k := range sortedKeys(tally){
 		if *fLines {
-			fmt.Printf("%4d ", tally[arg].Lines)
+			fmt.Printf("%5d ", tally[k].Lines)
 		}
 		if *fWords {
-			fmt.Printf("%4d ", tally[arg].Words)
+			fmt.Printf("%5d ", tally[k].Words)
 		}
 		if *fChars {
-			fmt.Printf("%4d ", tally[arg].Chars)
+			fmt.Printf("%5d ", tally[k].Chars)
 		}
-		fmt.Printf("%s\n", arg)
+		fmt.Printf("%s\n", k)
 	}
 }
