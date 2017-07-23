@@ -25,7 +25,7 @@ func fileReadBuf(path string, channel chan<- byte) {
 	defer close(channel)
 	if f, err := os.Open(path); err == nil {
 		defer f.Close()
-		const BUFSIZ = 1024
+		const BUFSIZ = 4096
 		buf := make([]byte, BUFSIZ)
 		readCount := 0
 		for n, err := f.Read(buf); err == nil; n, err = f.Read(buf) {
@@ -62,20 +62,20 @@ func scoreFile(path string, wg *sync.WaitGroup, result chan<- count) {
 		Lines: 0,
 	}
 	inWord := false
+	seeWhite := func() {
+		if inWord {
+			score.Words++
+		}
+		inWord = false
+	}
 	for datum := range fileBytes(path) {
 		score.Chars++
 		switch datum {
 		case ' ', '\t':
-			if inWord {
-				score.Words++
-			}
-			inWord = false
+			seeWhite()
 		case '\n':
 			score.Lines++
-			if inWord {
-				score.Words++
-			}
-			inWord = false
+			seeWhite()
 		default:
 			inWord = true
 		}
@@ -84,7 +84,7 @@ func scoreFile(path string, wg *sync.WaitGroup, result chan<- count) {
 }
 
 func makeVisitor(wg *sync.WaitGroup, results chan<- count) filepath.WalkFunc {
-	v := func(path string, info os.FileInfo, err error) error {
+	return func(path string, info os.FileInfo, err error) error {
 		if err == nil {
 			switch mode := info.Mode(); {
 			case mode.IsRegular():
@@ -98,7 +98,6 @@ func makeVisitor(wg *sync.WaitGroup, results chan<- count) filepath.WalkFunc {
 			return err
 		}
 	}
-	return v
 }
 
 func sortedKeys(m map[string]count) (keys []string) {
