@@ -1,11 +1,11 @@
 package main
 
 import (
-	"path/filepath"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 )
@@ -47,19 +47,23 @@ func fileBytes(path string) chan byte {
 }
 
 type count struct {
-	Path  string
-	Chars int
-	Words int
-	Lines int
+	Path        string
+	Chars       int
+	Words       int
+	Lines       int
+	CharPerWord int
+	CharPerLine int
 }
 
 func scoreFile(path string, wg *sync.WaitGroup, result chan<- count) {
 	defer wg.Done()
 	score := count{
-		Path:  path,
-		Chars: 0,
-		Words: 0,
-		Lines: 0,
+		Path:        path,
+		Chars:       0,
+		Words:       0,
+		Lines:       0,
+		CharPerWord: 0,
+		CharPerLine: 0,
 	}
 	inWord := false
 	seeWhite := func() {
@@ -108,6 +112,15 @@ func sortedKeys(m map[string]count) (keys []string) {
 	return keys
 }
 
+func aggregator(raw <-chan count, agg chan<- count) {
+	defer close(agg)
+	for item := range raw {
+		item.CharPerWord = item.Chars / item.Words
+		item.CharPerLine = item.Chars / item.Lines
+		agg <- item
+	}
+}
+
 func main() {
 	fChars := flag.Bool("c", false, "Count chars.")
 	fWords := flag.Bool("w", false, "Count words.")
@@ -126,11 +139,13 @@ func main() {
 		wg.Wait()
 		close(results)
 	}()
+	aggregates := make(chan count)
+	go aggregator(results, aggregates)
 	tally := make(map[string]count)
-	for result := range results {
+	for result := range aggregates {
 		tally[result.Path] = result
 	}
-	for _, k := range sortedKeys(tally){
+	for _, k := range sortedKeys(tally) {
 		if *fLines {
 			fmt.Printf("%5d ", tally[k].Lines)
 		}
@@ -140,6 +155,6 @@ func main() {
 		if *fChars {
 			fmt.Printf("%5d ", tally[k].Chars)
 		}
-		fmt.Printf("%s\n", k)
+		fmt.Printf("%d %d %s\n", tally[k].CharPerWord, tally[k].CharPerLine, k)
 	}
 }
